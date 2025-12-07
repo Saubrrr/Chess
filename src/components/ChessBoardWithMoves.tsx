@@ -1106,11 +1106,60 @@ export default function ChessBoardWithMoves({
           display: "flex",
           flexDirection: "column"
         }}>
-          <h3 style={{ margin: "0 0 12px 0", fontSize: "18px", fontWeight: "600" }}>Move Tree</h3>
           <div style={{ flex: "1", overflowY: "auto" }}>
             {renderTreeDisplay()}
           </div>
         </div>
+
+        {/* Possible Moves Buttons */}
+        {currentNode && currentNode.children.length >= 2 && (
+          <div style={{
+            backgroundColor: "#fff",
+            border: "2px solid #ccc",
+            borderRadius: "8px",
+            padding: "12px",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "6px",
+            alignItems: "center"
+          }}>
+            <span style={{ 
+              fontSize: "13px", 
+              color: "#666", 
+              marginRight: "4px",
+              fontWeight: "500"
+            }}>
+              Possible moves:
+            </span>
+            {currentNode.children.map((child) => (
+              <button
+                key={child.id}
+                onClick={() => navigateToNode(child)}
+                style={{
+                  padding: "4px 10px",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                  backgroundColor: "#f0f0f0",
+                  border: "1px solid #ccc",
+                  borderRadius: "4px",
+                  fontFamily: "monospace",
+                  transition: "background-color 0.15s",
+                  whiteSpace: "nowrap"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = "#4a90e2"
+                  e.currentTarget.style.color = "#fff"
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "#f0f0f0"
+                  e.currentTarget.style.color = "#000"
+                }}
+              >
+                {child.move.san}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Navigation Controls */}
         <div style={{
