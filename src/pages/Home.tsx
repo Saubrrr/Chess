@@ -21,6 +21,9 @@ export default function Home() {
   const [editingChapterId, setEditingChapterId] = useState<string | null>(null)
   const [editChapterName, setEditChapterName] = useState("")
   const [editChapterOrientation, setEditChapterOrientation] = useState<"white" | "black">("white")
+  const [showStudySelection, setShowStudySelection] = useState(false)
+  const [selectedChaptersForStudy, setSelectedChaptersForStudy] = useState<Set<string>>(new Set())
+  const [isStudyMode, setIsStudyMode] = useState(false)
 
   useEffect(() => {
     refreshStudies()
@@ -469,6 +472,80 @@ export default function Home() {
     }
   }
 
+  // Study mode handlers
+  const handleOpenStudySelection = () => {
+    if (!selectedStudyId) return
+    const study = studies.find(s => s.id === selectedStudyId)
+    if (study) {
+      // Initialize with all chapters selected
+      const allChapterIds = new Set(study.chapters.map(ch => ch.id))
+      setSelectedChaptersForStudy(allChapterIds)
+      setShowStudySelection(true)
+    }
+  }
+
+  const handleCloseStudySelection = () => {
+    setShowStudySelection(false)
+  }
+
+  const handleToggleChapterForStudy = (chapterId: string) => {
+    setSelectedChaptersForStudy(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(chapterId)) {
+        newSet.delete(chapterId)
+      } else {
+        newSet.add(chapterId)
+      }
+      return newSet
+    })
+  }
+
+  const handleStartStudy = () => {
+    if (selectedChaptersForStudy.size === 0) {
+      alert("Please select at least one chapter to study")
+      return
+    }
+    setIsStudyMode(true)
+    setShowStudySelection(false)
+    // TODO: Initialize study mode with selected chapters
+  }
+
+  const handleRefineStudy = () => {
+    // TODO: Add refine study functionality
+  }
+
+  // Count lines in a chapter
+  const countLinesInChapter = (chapter: Chapter): number => {
+    if (!chapter || !chapter.game || !chapter.game.rootNodes) return 0
+    
+    const deserialized = deserializeGameFromStorage(chapter.game)
+    const rootNodes = deserialized.rootNodes
+    
+    if (rootNodes.length === 0) return 0
+    
+    const countLinesFromNode = (node: MoveNode): number => {
+      // If this is a leaf node (no children), it's one line
+      if (node.children.length === 0) {
+        return 1
+      }
+      
+      // Otherwise, sum up all lines from all children
+      let total = 0
+      for (const child of node.children) {
+        total += countLinesFromNode(child)
+      }
+      return total
+    }
+    
+    // Count lines from each root node
+    let count = 0
+    for (const rootNode of rootNodes) {
+      count += countLinesFromNode(rootNode)
+    }
+    
+    return count
+  }
+
   // Load chapter data when chapter changes
   useEffect(() => {
     if (selectedStudyId && selectedChapterId) {
@@ -491,21 +568,36 @@ export default function Home() {
         flexDirection: "column",
         padding: "20px"
       }}>
-        <button
-          onClick={handleExit}
-          style={{
-            padding: "8px 16px",
-            backgroundColor: "#f0f0f0",
-            border: "1px solid #ccc",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontSize: "14px",
-            marginBottom: "16px",
-            alignSelf: "flex-start"
-          }}
-        >
-          ← Exit
-        </button>
+        <div style={{ display: "flex", gap: "8px", marginBottom: "16px", alignSelf: "flex-start" }}>
+          <button
+            onClick={handleExit}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#f0f0f0",
+              border: "1px solid #ccc",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "14px"
+            }}
+          >
+            ← Exit
+          </button>
+          <button
+            onClick={handleOpenStudySelection}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#4a90e2",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "14px",
+              fontWeight: "500"
+            }}
+          >
+            Study
+          </button>
+        </div>
         <div style={{
           display: "flex",
           gap: "20px",
@@ -775,19 +867,36 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <button
-                onClick={() => setShowNewChapterInput(true)}
-                style={{
-                  padding: "10px",
-                  backgroundColor: "#f0f0f0",
-                  border: "1px solid #ccc",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontSize: "14px"
-                }}
-              >
-                + New Chapter
-              </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <button
+                  onClick={() => setShowNewChapterInput(true)}
+                  style={{
+                    padding: "10px",
+                    backgroundColor: "#f0f0f0",
+                    border: "1px solid #ccc",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px"
+                  }}
+                >
+                  + New Chapter
+                </button>
+                <button
+                  onClick={handleOpenStudySelection}
+                  style={{
+                    padding: "10px",
+                    backgroundColor: "#4a90e2",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px",
+                    fontWeight: "500"
+                  }}
+                >
+                  Study
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -947,6 +1056,173 @@ export default function Home() {
                   }}
                 >
                   SAVE CHAPTER
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Study Selection Modal */}
+        {showStudySelection && selectedStudyId && (
+          <div style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1002
+          }}
+          onClick={handleCloseStudySelection}
+          >
+            <div style={{
+              backgroundColor: "#fff",
+              padding: "24px",
+              borderRadius: "8px",
+              minWidth: "500px",
+              maxWidth: "600px",
+              maxHeight: "80vh",
+              overflowY: "auto"
+            }}
+            onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ marginBottom: "16px", fontSize: "18px", fontWeight: "600" }}>
+                Select Chapters to Study
+              </div>
+              
+              <div style={{ marginBottom: "16px", fontSize: "14px", color: "#666" }}>
+                Choose which chapters to include in your study session. Toggle chapters on or off using the switches.
+              </div>
+
+              <div style={{ marginBottom: "24px", maxHeight: "400px", overflowY: "auto" }}>
+                {study && study.chapters.length > 0 ? (
+                  study.chapters.map((chapter, index) => (
+                    <div
+                      key={chapter.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "12px",
+                        marginBottom: "8px",
+                        backgroundColor: "#f9f9f9",
+                        borderRadius: "4px",
+                        border: "1px solid #e0e0e0"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: 1 }}>
+                        <span style={{ 
+                          fontSize: "14px", 
+                          color: "#666", 
+                          minWidth: "24px",
+                          fontWeight: "500"
+                        }}>
+                          {index + 1}
+                        </span>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "2px", flex: 1 }}>
+                          <span style={{ fontSize: "14px", fontWeight: "500" }}>
+                            {chapter.name || "Untitled Chapter"}
+                          </span>
+                          <span style={{ fontSize: "12px", color: "#666" }}>
+                            {countLinesInChapter(chapter)} line{countLinesInChapter(chapter) !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleRefineStudy}
+                        style={{
+                          padding: "4px 8px",
+                          backgroundColor: "#6c757d",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                          marginRight: "8px"
+                        }}
+                      >
+                        Refine Study
+                      </button>
+                      <label style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        cursor: "pointer",
+                        position: "relative",
+                        width: "50px",
+                        height: "26px"
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedChaptersForStudy.has(chapter.id)}
+                          onChange={() => handleToggleChapterForStudy(chapter.id)}
+                          style={{
+                            opacity: 0,
+                            width: 0,
+                            height: 0
+                          }}
+                        />
+                        <span style={{
+                          position: "absolute",
+                          width: "50px",
+                          height: "26px",
+                          backgroundColor: selectedChaptersForStudy.has(chapter.id) ? "#4a90e2" : "#ccc",
+                          borderRadius: "13px",
+                          transition: "background-color 0.2s",
+                          cursor: "pointer"
+                        }} />
+                        <span style={{
+                          position: "absolute",
+                          width: "22px",
+                          height: "22px",
+                          borderRadius: "50%",
+                          backgroundColor: "#fff",
+                          top: "2px",
+                          left: selectedChaptersForStudy.has(chapter.id) ? "26px" : "2px",
+                          transition: "left 0.2s",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                          pointerEvents: "none"
+                        }} />
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ padding: "24px", textAlign: "center", color: "#666" }}>
+                    No chapters available
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                <button
+                  onClick={handleCloseStudySelection}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "#f0f0f0",
+                    border: "1px solid #ccc",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px"
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleStartStudy}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "#4a90e2",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px",
+                    fontWeight: "500"
+                  }}
+                >
+                  Start Study
                 </button>
               </div>
             </div>
