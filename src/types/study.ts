@@ -17,6 +17,7 @@ export interface Chapter {
   id: string
   name: string
   game: Game
+  orientation?: "white" | "black"
   createdAt: string
   updatedAt: string
 }

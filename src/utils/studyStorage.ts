@@ -144,6 +144,36 @@ export function deleteChapterFromStudy(studyId: string, chapterId: string): bool
   return updateStudy(study)
 }
 
+// Reorder chapters in a study
+export function reorderChaptersInStudy(studyId: string, chapterIds: string[]): boolean {
+  const study = getStudyById(studyId)
+  if (!study) return false
+  
+  // Create a map of chapter by ID for quick lookup
+  const chapterMap = new Map(study.chapters.map(c => [c.id, c]))
+  
+  // Reorder chapters based on the provided order
+  const reorderedChapters: Chapter[] = []
+  for (const chapterId of chapterIds) {
+    const chapter = chapterMap.get(chapterId)
+    if (chapter) {
+      reorderedChapters.push(chapter)
+    }
+  }
+  
+  // Add any remaining chapters that weren't in the order list
+  for (const chapter of study.chapters) {
+    if (!chapterIds.includes(chapter.id)) {
+      reorderedChapters.push(chapter)
+    }
+  }
+  
+  study.chapters = reorderedChapters
+  study.updatedAt = new Date().toISOString()
+  
+  return updateStudy(study)
+}
+
 // Get a chapter by ID
 export function getChapterById(studyId: string, chapterId: string): Chapter | null {
   const study = getStudyById(studyId)

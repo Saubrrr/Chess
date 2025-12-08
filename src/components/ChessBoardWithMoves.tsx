@@ -19,6 +19,7 @@ interface ChessBoardWithMovesProps {
   movable?: boolean
   initialRootNodes?: MoveNode[]
   onSave?: (rootNodes: MoveNode[]) => void
+  orientation?: "white" | "black"
 }
 
 export default function ChessBoardWithMoves({ 
@@ -26,7 +27,8 @@ export default function ChessBoardWithMoves({
   initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
   movable = true,
   initialRootNodes,
-  onSave
+  onSave,
+  orientation: propOrientation = "white"
 }: ChessBoardWithMovesProps) {
   const gameRef = useRef(new Chess(initialFen))
   const [boardKey, setBoardKey] = useState(0)
@@ -34,7 +36,12 @@ export default function ChessBoardWithMoves({
   // Move tree state
   const [rootNodes, setRootNodes] = useState<MoveNode[]>(initialRootNodes || [])
   const [currentNode, setCurrentNode] = useState<MoveNode | null>(null)
-  const [orientation, setOrientation] = useState<"white" | "black">("white")
+  const [orientation, setOrientation] = useState<"white" | "black">(propOrientation)
+
+  // Update orientation when prop changes
+  useEffect(() => {
+    setOrientation(propOrientation)
+  }, [propOrientation])
   
   // Dropdown menu state
   const [dropdownMenu, setDropdownMenu] = useState<{
@@ -706,6 +713,35 @@ export default function ChessBoardWithMoves({
     return { number: moveNumber, isWhite }
   }
 
+  // Count all lines in the move tree
+  // A line is a complete path from a root/variation start to a leaf node
+  const countLines = (nodes: MoveNode[]): number => {
+    if (nodes.length === 0) return 0
+    
+    let count = 0
+    
+    const countLinesFromNode = (node: MoveNode): number => {
+      // If this is a leaf node (no children), it's one line
+      if (node.children.length === 0) {
+        return 1
+      }
+      
+      // Otherwise, sum up all lines from all children
+      let total = 0
+      for (const child of node.children) {
+        total += countLinesFromNode(child)
+      }
+      return total
+    }
+    
+    // Count lines from each root node
+    for (const rootNode of nodes) {
+      count += countLinesFromNode(rootNode)
+    }
+    
+    return count
+  }
+
   // Render tree display for moves
   const renderTreeDisplay = () => {
     if (rootNodes.length === 0) {
@@ -960,8 +996,17 @@ export default function ChessBoardWithMoves({
           padding: "12px",
           display: "flex",
           gap: "8px",
-          flexWrap: "wrap"
+          flexWrap: "wrap",
+          alignItems: "center"
         }}>
+          <span style={{
+            fontSize: "14px",
+            fontWeight: "500",
+            color: "#333",
+            marginRight: "4px"
+          }}>
+            Lines: {countLines(rootNodes)}
+          </span>
           <button
             onClick={() => {
               const input = document.createElement('input')

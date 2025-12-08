@@ -1,7 +1,7 @@
 import { useState, useEffect, ChangeEvent } from "react"
 import { Study, Chapter } from "@/types/study"
 import { MoveNode } from "@/types/moveTree"
-import { loadStudies, createStudy, addStudy, deleteStudy, getChapterById, updateChapterInStudy, addChapterToStudy, createChapter, deserializeGameFromStorage, serializeGameForStorage } from "@/utils/studyStorage"
+import { loadStudies, createStudy, addStudy, deleteStudy, getChapterById, updateChapterInStudy, addChapterToStudy, createChapter, deserializeGameFromStorage, serializeGameForStorage, reorderChaptersInStudy, deleteChapterFromStudy } from "@/utils/studyStorage"
 import { importFromPGN, generateChapterNameFromMetadata, PGNMetadata } from "@/utils/pgnUtils"
 import ChessBoardWithMoves from "@/components/ChessBoardWithMoves"
 
@@ -17,6 +17,10 @@ export default function Home() {
   const [newChapterName, setNewChapterName] = useState("")
   const [newChapterTab, setNewChapterTab] = useState<"Empty" | "PGN">("Empty")
   const [pgnText, setPgnText] = useState("")
+  const [draggedChapterId, setDraggedChapterId] = useState<string | null>(null)
+  const [editingChapterId, setEditingChapterId] = useState<string | null>(null)
+  const [editChapterName, setEditChapterName] = useState("")
+  const [editChapterOrientation, setEditChapterOrientation] = useState<"white" | "black">("white")
 
   useEffect(() => {
     refreshStudies()
@@ -248,6 +252,200 @@ export default function Home() {
     }
   }
 
+  // Handle drag and drop for chapters
+  const handleDragStart = (chapterId: string) => {
+    setDraggedChapterId(chapterId)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+  }
+
+  const handleDrop = (targetChapterId: string) => {
+    if (!draggedChapterId || !selectedStudyId || draggedChapterId === targetChapterId) {
+      setDraggedChapterId(null)
+      return
+    }
+
+    const study = studies.find(s => s.id === selectedStudyId)
+    if (!study) {
+      setDraggedChapterId(null)
+      return
+    }
+
+    const chapterIds = study.chapters.map(c => c.id)
+    const draggedIndex = chapterIds.indexOf(draggedChapterId)
+    const targetIndex = chapterIds.indexOf(targetChapterId)
+
+    if (draggedIndex === -1 || targetIndex === -1) {
+      setDraggedChapterId(null)
+      return
+    }
+
+    // Reorder chapters
+    const newChapterIds = [...chapterIds]
+    newChapterIds.splice(draggedIndex, 1)
+    newChapterIds.splice(targetIndex, 0, draggedChapterId)
+
+    if (reorderChaptersInStudy(selectedStudyId, newChapterIds)) {
+      refreshStudies()
+    }
+
+    setDraggedChapterId(null)
+  }
+
+  // Handle chapter settings
+  const handleOpenSettings = (chapterId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const chapter = getChapterById(selectedStudyId!, chapterId)
+    if (chapter) {
+      setEditingChapterId(chapterId)
+      setEditChapterName(chapter.name)
+      setEditChapterOrientation(chapter.orientation || "white")
+    }
+  }
+
+  const handleCloseSettings = () => {
+    setEditingChapterId(null)
+    setEditChapterName("")
+    setEditChapterOrientation("white")
+  }
+
+  const handleSaveChapter = () => {
+    if (!selectedStudyId || !editingChapterId) return
+
+    const chapter = getChapterById(selectedStudyId, editingChapterId)
+    if (!chapter) return
+
+    const updatedChapter: Chapter = {
+      ...chapter,
+      name: editChapterName.trim() || "Untitled Chapter",
+      orientation: editChapterOrientation,
+      updatedAt: new Date().toISOString()
+    }
+
+    if (updateChapterInStudy(selectedStudyId, editingChapterId, updatedChapter)) {
+      refreshStudies()
+      if (selectedChapterId === editingChapterId) {
+        loadChapterData(updatedChapter)
+      }
+      handleCloseSettings()
+    }
+  }
+
+  const handleClearAnnotations = () => {
+    if (!selectedStudyId || !editingChapterId) return
+
+    const chapter = getChapterById(selectedStudyId, editingChapterId)
+    if (!chapter) return
+
+    // Remove all comments from all nodes
+    const removeComments = (nodes: MoveNode[]) => {
+      nodes.forEach(node => {
+        node.comment = undefined
+        if (node.children.length > 0) {
+          removeComments(node.children)
+        }
+      })
+    }
+
+    const deserialized = deserializeGameFromStorage(chapter.game)
+    removeComments(deserialized.rootNodes)
+    const serialized = serializeGameForStorage(deserialized.rootNodes, chapter.game.initialFen)
+
+    const updatedChapter: Chapter = {
+      ...chapter,
+      game: {
+        ...chapter.game,
+        rootNodes: serialized.rootNodes,
+        updatedAt: new Date().toISOString()
+      },
+      updatedAt: new Date().toISOString()
+    }
+
+    if (updateChapterInStudy(selectedStudyId, editingChapterId, updatedChapter)) {
+      refreshStudies()
+      if (selectedChapterId === editingChapterId) {
+        loadChapterData(updatedChapter)
+      }
+    }
+  }
+
+  const handleClearVariations = () => {
+    if (!selectedStudyId || !editingChapterId) return
+
+    const chapter = getChapterById(selectedStudyId, editingChapterId)
+    if (!chapter) return
+
+    // Keep only main line moves, remove all variations and comments
+    const keepMainLine = (node: MoveNode, parent: MoveNode | null): MoveNode | null => {
+      // Create a cleaned node without comments
+      const cleanedNode: MoveNode = {
+        ...node,
+        parent: parent,
+        comment: undefined,
+        children: [],
+        isMainLine: true
+      }
+
+      // Find the main line child (or first child if no main line marked)
+      const mainChild = node.children.find(c => c.isMainLine) || (node.children.length > 0 ? node.children[0] : null)
+      
+      if (mainChild) {
+        const mainLineChild = keepMainLine(mainChild, cleanedNode)
+        if (mainLineChild) {
+          cleanedNode.children = [mainLineChild]
+        }
+      }
+
+      return cleanedNode
+    }
+
+    const deserialized = deserializeGameFromStorage(chapter.game)
+    // Process each root node and keep only its main line
+    const mainLineNodes: MoveNode[] = []
+    for (const rootNode of deserialized.rootNodes) {
+      const mainLineNode = keepMainLine(rootNode, null)
+      if (mainLineNode) {
+        mainLineNodes.push(mainLineNode)
+      }
+    }
+
+    const serialized = serializeGameForStorage(mainLineNodes, chapter.game.initialFen)
+
+    const updatedChapter: Chapter = {
+      ...chapter,
+      game: {
+        ...chapter.game,
+        rootNodes: serialized.rootNodes,
+        updatedAt: new Date().toISOString()
+      },
+      updatedAt: new Date().toISOString()
+    }
+
+    if (updateChapterInStudy(selectedStudyId, editingChapterId, updatedChapter)) {
+      refreshStudies()
+      if (selectedChapterId === editingChapterId) {
+        loadChapterData(updatedChapter)
+      }
+    }
+  }
+
+  const handleDeleteChapter = () => {
+    if (!selectedStudyId || !editingChapterId) return
+
+    if (confirm("Are you sure you want to delete this chapter?")) {
+      if (deleteChapterFromStudy(selectedStudyId, editingChapterId)) {
+        refreshStudies()
+        if (selectedChapterId === editingChapterId) {
+          setSelectedChapterId(null)
+          setCurrentRootNodes([])
+        }
+        handleCloseSettings()
+      }
+    }
+  }
+
   // Load chapter data when chapter changes
   useEffect(() => {
     if (selectedStudyId && selectedChapterId) {
@@ -301,6 +499,7 @@ export default function Home() {
               initialFen={chapter?.game.initialFen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"}
               movable={true}
               initialRootNodes={currentRootNodes}
+              orientation={chapter?.orientation || "white"}
               onSave={(rootNodes) => {
                 setCurrentRootNodes(rootNodes)
                 saveCurrentChapter()
@@ -331,9 +530,13 @@ export default function Home() {
             
             {study && study.chapters.length > 0 && (
               <div style={{ marginBottom: "16px" }}>
-                {study.chapters.slice(0, 3).map((ch) => (
+                {study.chapters.map((ch, index) => (
                   <div
                     key={ch.id}
+                    draggable
+                    onDragStart={() => handleDragStart(ch.id)}
+                    onDragOver={handleDragOver}
+                    onDrop={() => handleDrop(ch.id)}
                     onClick={() => handleChapterSwitch(ch.id)}
                     style={{
                       padding: "10px",
@@ -342,10 +545,44 @@ export default function Home() {
                       border: selectedChapterId === ch.id ? "2px solid #4a90e2" : "1px solid #ddd",
                       borderRadius: "4px",
                       cursor: "pointer",
-                      fontSize: "14px"
+                      fontSize: "14px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      opacity: draggedChapterId === ch.id ? 0.5 : 1
                     }}
                   >
-                    {ch.name || "Untitled Chapter"}
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
+                      <span style={{ 
+                        fontSize: "12px", 
+                        color: "#666", 
+                        minWidth: "20px",
+                        fontWeight: "500"
+                      }}>
+                        {index + 1}
+                      </span>
+                      <span style={{ flex: 1 }}>{ch.name || "Untitled Chapter"}</span>
+                    </div>
+                    <button
+                      onClick={(e) => handleOpenSettings(ch.id, e)}
+                      style={{
+                        padding: "4px 8px",
+                        backgroundColor: "transparent",
+                        border: "1px solid #ccc",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        marginLeft: "8px"
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#f0f0f0"
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "transparent"
+                      }}
+                    >
+                      ⚙️
+                    </button>
                   </div>
                 ))}
               </div>
@@ -531,6 +768,167 @@ export default function Home() {
             )}
           </div>
         </div>
+
+        {/* Chapter Settings Modal */}
+        {editingChapterId && (
+          <div style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1001
+          }}
+          onClick={handleCloseSettings}
+          >
+            <div style={{
+              backgroundColor: "#fff",
+              padding: "24px",
+              borderRadius: "8px",
+              minWidth: "500px",
+              maxWidth: "600px",
+              maxHeight: "80vh",
+              overflowY: "auto"
+            }}
+            onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ marginBottom: "16px", fontSize: "18px", fontWeight: "600" }}>
+                Edit chapter
+              </div>
+              
+              <div style={{ marginBottom: "16px" }}>
+                <div style={{ marginBottom: "8px", fontSize: "14px" }}>Name</div>
+                <input
+                  type="text"
+                  value={editChapterName}
+                  onChange={(e) => setEditChapterName(e.target.value)}
+                  placeholder="Chapter name"
+                  style={{
+                    width: "100%",
+                    padding: "8px",
+                    border: "1px solid #ccc",
+                    borderRadius: "4px",
+                    fontSize: "14px"
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "16px" }}>
+                <div style={{ marginBottom: "8px", fontSize: "14px" }}>Board side</div>
+                <select
+                  value={editChapterOrientation}
+                  onChange={(e) => {
+                    const newOrientation = e.target.value as "white" | "black"
+                    setEditChapterOrientation(newOrientation)
+                    // Update immediately if this is the current chapter
+                    if (selectedChapterId === editingChapterId && selectedStudyId) {
+                      const chapter = getChapterById(selectedStudyId, editingChapterId)
+                      if (chapter) {
+                        const updatedChapter: Chapter = {
+                          ...chapter,
+                          orientation: newOrientation,
+                          updatedAt: new Date().toISOString()
+                        }
+                        updateChapterInStudy(selectedStudyId, editingChapterId, updatedChapter)
+                        refreshStudies()
+                      }
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "8px",
+                    border: "1px solid #ccc",
+                    borderRadius: "4px",
+                    fontSize: "14px"
+                  }}
+                >
+                  <option value="white">White</option>
+                  <option value="black">Black</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: "16px", display: "flex", gap: "16px" }}>
+                <button
+                  onClick={handleClearAnnotations}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "transparent",
+                    border: "none",
+                    color: "#d32f2f",
+                    cursor: "pointer",
+                    fontSize: "14px"
+                  }}
+                >
+                  CLEAR ANNOTATIONS
+                </button>
+                <button
+                  onClick={handleClearVariations}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "transparent",
+                    border: "none",
+                    color: "#d32f2f",
+                    cursor: "pointer",
+                    fontSize: "14px"
+                  }}
+                >
+                  CLEAR VARIATIONS
+                </button>
+              </div>
+
+              <div style={{ marginBottom: "16px" }}>
+                <button
+                  onClick={handleDeleteChapter}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "transparent",
+                    border: "none",
+                    color: "#d32f2f",
+                    cursor: "pointer",
+                    fontSize: "14px",
+                    textDecoration: "underline"
+                  }}
+                >
+                  DELETE CHAPTER
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                <button
+                  onClick={handleCloseSettings}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "#f0f0f0",
+                    border: "1px solid #ccc",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px"
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveChapter}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "#4a90e2",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px"
+                  }}
+                >
+                  SAVE CHAPTER
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
