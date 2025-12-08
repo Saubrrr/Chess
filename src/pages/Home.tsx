@@ -98,12 +98,19 @@ export default function Home() {
 
   const handleStudyClick = (studyId: string) => {
     setSelectedStudyId(studyId)
-    // If study has chapters, select the first one, otherwise create a new chapter
     const study = studies.find(s => s.id === studyId)
-    if (study && study.chapters.length > 0) {
-      setSelectedChapterId(study.chapters[0].id)
-    } else {
-      setSelectedChapterId(null)
+    // Ensure study has at least one chapter
+    if (study) {
+      if (study.chapters.length === 0) {
+        // Create an empty chapter if study has none
+        const newChapter = createChapter("Chapter 1")
+        if (addChapterToStudy(studyId, newChapter)) {
+          refreshStudies()
+          setSelectedChapterId(newChapter.id)
+        }
+      } else {
+        setSelectedChapterId(study.chapters[0].id)
+      }
     }
   }
 
@@ -434,12 +441,28 @@ export default function Home() {
   const handleDeleteChapter = () => {
     if (!selectedStudyId || !editingChapterId) return
 
+    const study = studies.find(s => s.id === selectedStudyId)
+    const isLastChapter = study && study.chapters.length === 1
+    const wasCurrentChapter = selectedChapterId === editingChapterId
+
     if (confirm("Are you sure you want to delete this chapter?")) {
       if (deleteChapterFromStudy(selectedStudyId, editingChapterId)) {
         refreshStudies()
-        if (selectedChapterId === editingChapterId) {
-          setSelectedChapterId(null)
-          setCurrentRootNodes([])
+        // Get the updated study after refresh
+        const updatedStudies = loadStudies()
+        const updatedStudy = updatedStudies.find(s => s.id === selectedStudyId)
+        
+        if (updatedStudy && updatedStudy.chapters.length > 0) {
+          if (isLastChapter && wasCurrentChapter) {
+            // Switch to the new empty chapter that was just created
+            const newChapter = updatedStudy.chapters[updatedStudy.chapters.length - 1]
+            setSelectedChapterId(newChapter.id)
+            loadChapterData(newChapter)
+          } else if (wasCurrentChapter) {
+            // If there are other chapters, select the first one
+            setSelectedChapterId(updatedStudy.chapters[0].id)
+            loadChapterData(updatedStudy.chapters[0])
+          }
         }
         handleCloseSettings()
       }

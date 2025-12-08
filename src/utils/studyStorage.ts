@@ -38,10 +38,12 @@ export function saveStudies(studies: Study[]): boolean {
 // Create a new study
 export function createStudy(name: string): Study {
   const now = new Date().toISOString()
+  // Always create a study with at least one empty chapter
+  const firstChapter = createChapter("Chapter 1")
   return {
     id: Math.random().toString(36).substr(2, 9),
     name,
-    chapters: [],
+    chapters: [firstChapter],
     createdAt: now,
     updatedAt: now
   }
@@ -138,7 +140,17 @@ export function deleteChapterFromStudy(studyId: string, chapterId: string): bool
   const study = getStudyById(studyId)
   if (!study) return false
   
+  // If this is the last chapter, create a new empty one after deletion
+  const isLastChapter = study.chapters.length === 1
+  
   study.chapters = study.chapters.filter(c => c.id !== chapterId)
+  
+  // If it was the last chapter, create a new empty chapter
+  if (isLastChapter) {
+    const newChapter = createChapter("Chapter 1")
+    study.chapters.push(newChapter)
+  }
+  
   study.updatedAt = new Date().toISOString()
   
   return updateStudy(study)
