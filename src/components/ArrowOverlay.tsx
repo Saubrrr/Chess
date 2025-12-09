@@ -4,11 +4,6 @@
  * 
  * This component renders on top of the board squares but below the pieces
  * (or can be above pieces if needed).
- * 
- * extra random comments bc my github buggin
- * blablablalbalbbla
- * teesting mroe
- * wdawdawd
  */
 
 import { Square } from "chess.js"
