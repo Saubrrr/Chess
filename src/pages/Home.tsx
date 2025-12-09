@@ -2,7 +2,7 @@ import { useState, useEffect, ChangeEvent } from "react"
 import { Study, Chapter } from "@/types/study"
 import { MoveNode } from "@/types/moveTree"
 import { loadStudies, createStudy, addStudy, deleteStudy, getChapterById, updateChapterInStudy, addChapterToStudy, createChapter, deserializeGameFromStorage, serializeGameForStorage } from "@/utils/studyStorage"
-import { importFromPGN, generateChapterNameFromMetadata, PGNMetadata } from "@/utils/pgnHandler"
+import { importFromPGN, generateChapterNameFromMetadata, PGNMetadata } from "@/utils/pgnUtils"
 import ChessBoardWithMoves from "@/components/ChessBoardWithMoves"
 
 export default function Home() {

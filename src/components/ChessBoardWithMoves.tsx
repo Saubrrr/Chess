@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react"
 import { Chess, Move, Square, PieceSymbol, Color } from "chess.js"
 import PieceImage from "./PieceImage"
+import ArrowOverlay from "./ArrowOverlay"
 import { MoveNode, createMoveNode, getPathToNode, buildTreeDisplay, TreeLine } from "@/types/moveTree"
+import { useArrowAnnotations } from "@/hooks/useArrowAnnotations"
+import { ArrowColor, getColorCode } from "@/types/arrows"
 //import { exportToPGN, importFromPGN, PGNMetadata } from "@/utils/pgnHandler"
 //import { importFromPGN, exportToPGN } from "@/utils/pgnHandler"
 import {
@@ -63,6 +66,23 @@ export default function ChessBoardWithMoves({
     from: Square
     to: Square
   } | null>(null)
+
+  // Arrow annotations hook
+  const {
+    arrows,
+    highlights,
+    addArrow,
+    addHighlight,
+    clearCurrentAnnotations,
+    setCurrentFen
+  } = useArrowAnnotations(initialFen)
+
+  // Arrow drawing state
+  const [drawingArrow, setDrawingArrow] = useState<{
+    from: Square
+    to: Square
+  } | null>(null)
+  const [arrowColor, setArrowColor] = useState<ArrowColor>("green")
 
   const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
   const ranks = ['8', '7', '6', '5', '4', '3', '2', '1']
@@ -140,6 +160,7 @@ export default function ChessBoardWithMoves({
           // Navigate to existing first move
           setCurrentNode(existingRoot)
           setLastMove([existingRoot.move.from as Square, existingRoot.move.to as Square])
+          setCurrentFen(existingRoot.fen)
         } else {
           // Create new root node
           const isMainLine = rootNodes.length === 0
@@ -148,6 +169,7 @@ export default function ChessBoardWithMoves({
           setRootNodes(updatedRootNodes)
           setCurrentNode(newNode)
           setLastMove([move.from as Square, move.to as Square])
+          setCurrentFen(newFen)
           if (onSave) onSave(updatedRootNodes)
         }
       } else {
@@ -160,6 +182,7 @@ export default function ChessBoardWithMoves({
         // Navigate to existing variation
         setCurrentNode(existingChild)
         setLastMove([existingChild.move.from as Square, existingChild.move.to as Square])
+        setCurrentFen(existingChild.fen)
       } else {
         // Create new node
           const isMainLine = currentNode.children.length === 0
@@ -167,6 +190,7 @@ export default function ChessBoardWithMoves({
           currentNode.children.push(newNode)
           setCurrentNode(newNode)
           setLastMove([move.from as Square, move.to as Square])
+          setCurrentFen(newFen)
           if (onSave) onSave(rootNodes)
         }
       }
@@ -238,6 +262,53 @@ export default function ChessBoardWithMoves({
       setDraggedPiece(null)
       setDragPosition(null)
     }
+    
+    // Handle arrow drawing completion
+    if (drawingArrow) {
+      const element = document.elementFromPoint(e.clientX, e.clientY)
+      const toSquare = element?.getAttribute('data-square') as Square | null
+      
+      if (toSquare) {
+        if (drawingArrow.from === toSquare) {
+          // Same square - toggle highlight
+          addHighlight(toSquare, arrowColor)
+        } else {
+          // Different square - add arrow
+          addArrow(drawingArrow.from, toSquare, arrowColor)
+        }
+      }
+      
+      setDrawingArrow(null)
+    }
+  }
+
+  // Right-click handlers for drawing arrows
+  const handleRightMouseDown = (e: React.MouseEvent, square: Square) => {
+    e.preventDefault()
+    
+    // Determine arrow color based on modifier keys
+    let color: ArrowColor = "green"
+    if (e.shiftKey) color = "red"
+    else if (e.ctrlKey || e.metaKey) color = "blue"
+    else if (e.altKey) color = "yellow"
+    
+    setArrowColor(color)
+    setDrawingArrow({ from: square, to: square })
+  }
+
+  const handleRightMouseMove = (e: MouseEvent) => {
+    if (drawingArrow) {
+      const element = document.elementFromPoint(e.clientX, e.clientY)
+      const square = element?.getAttribute('data-square') as Square | null
+      
+      if (square) {
+        setDrawingArrow(prev => prev ? { ...prev, to: square } : null)
+      }
+    }
+  }
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
   }
 
   // Sync initialRootNodes when they change
@@ -258,14 +329,19 @@ export default function ChessBoardWithMoves({
   }, [initialRootNodes])
 
   useEffect(() => {
-    document.addEventListener('mousemove', handleMouseMove)
+    const onMouseMove = (e: MouseEvent) => {
+      handleMouseMove(e)
+      handleRightMouseMove(e)
+    }
+    
+    document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
     
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mousemove', onMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [draggedPiece, legalMoves])
+  }, [draggedPiece, legalMoves, drawingArrow, arrowColor])
 
   // Keyboard navigation with arrow keys
   useEffect(() => {
@@ -317,8 +393,12 @@ export default function ChessBoardWithMoves({
   const updateBoard = (node: MoveNode | null) => {
     if (node) {
       setLastMove([node.move.from as Square, node.move.to as Square])
+      // Update arrow annotations to this position
+      setCurrentFen(node.fen)
     } else {
       setLastMove(null)
+      // Reset to initial position for arrows
+      setCurrentFen(initialFen)
     }
     setSelectedSquare(null)
     setLegalMoves([])
@@ -516,7 +596,14 @@ export default function ChessBoardWithMoves({
                   key={square}
                   data-square={square}
                   onClick={() => handleSquareClick(square)}
-                  onMouseDown={(e) => handleMouseDown(e, square)}
+                  onMouseDown={(e) => {
+                    if (e.button === 0) {
+                      handleMouseDown(e, square)
+                    } else if (e.button === 2) {
+                      handleRightMouseDown(e, square)
+                    }
+                  }}
+                  onContextMenu={handleContextMenu}
                   style={{
                     backgroundColor: 
                       isSquareSelected(square) ? '#7fb3d5' :
@@ -582,6 +669,16 @@ export default function ChessBoardWithMoves({
               )
             })
           )}
+          
+          {/* Arrow overlay */}
+          <ArrowOverlay
+            arrows={arrows}
+            highlights={highlights}
+            boardSize={800}
+            orientation={orientation}
+            drawingArrow={drawingArrow}
+            drawingColor={getColorCode(arrowColor)}
+          />
         </div>
         
         {/* Dragged piece */}
@@ -1162,6 +1259,17 @@ export default function ChessBoardWithMoves({
             border: "1px solid #ccc",
             borderRadius: "4px"
           }}>🔄</button>
+          <button 
+            onClick={clearCurrentAnnotations} 
+            title="Clear arrows (right-click + drag to draw)"
+            style={{
+              padding: "8px 12px",
+              fontSize: "16px",
+              cursor: "pointer",
+              backgroundColor: "#f0f0f0",
+              border: "1px solid #ccc",
+              borderRadius: "4px"
+            }}>🧹</button>
         </div>
       </div>
       
