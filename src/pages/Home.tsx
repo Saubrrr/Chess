@@ -1,9 +1,12 @@
 import { useState, useEffect, ChangeEvent } from "react"
 import { Study, Chapter } from "@/types/study"
 import { MoveNode } from "@/types/moveTree"
+import { StudyConfiguration } from "@/types/studyConfig"
 import { loadStudies, createStudy, addStudy, deleteStudy, getChapterById, updateChapterInStudy, addChapterToStudy, createChapter, deserializeGameFromStorage, serializeGameForStorage, reorderChaptersInStudy, deleteChapterFromStudy } from "@/utils/studyStorage"
 import { importFromPGN, generateChapterNameFromMetadata, PGNMetadata } from "@/utils/pgnUtils"
 import ChessBoardWithMoves from "@/components/ChessBoardWithMoves"
+import StudyConfigurationComponent from "@/components/StudyConfiguration"
+import StudySession from "@/components/StudySession"
 
 export default function Home() {
   const [studies, setStudies] = useState<Study[]>([])
@@ -23,7 +26,9 @@ export default function Home() {
   const [editChapterOrientation, setEditChapterOrientation] = useState<"white" | "black">("white")
   const [showStudySelection, setShowStudySelection] = useState(false)
   const [selectedChaptersForStudy, setSelectedChaptersForStudy] = useState<Set<string>>(new Set())
-  const [isStudyMode, setIsStudyMode] = useState(false)
+  const [showStudyConfiguration, setShowStudyConfiguration] = useState(false)
+  const [studyConfiguration, setStudyConfiguration] = useState<StudyConfiguration | null>(null)
+  const [isInStudySession, setIsInStudySession] = useState(false)
 
   useEffect(() => {
     refreshStudies()
@@ -505,13 +510,19 @@ export default function Home() {
       alert("Please select at least one chapter to study")
       return
     }
-    setIsStudyMode(true)
     setShowStudySelection(false)
-    // TODO: Initialize study mode with selected chapters
+    setShowStudyConfiguration(true)
   }
 
-  const handleRefineStudy = () => {
-    // TODO: Add refine study functionality
+  const handleStudyConfigurationStart = (config: StudyConfiguration) => {
+    setStudyConfiguration(config)
+    setShowStudyConfiguration(false)
+    setIsInStudySession(true)
+  }
+
+  const handleExitStudySession = () => {
+    setIsInStudySession(false)
+    setStudyConfiguration(null)
   }
 
   // Count lines in a chapter
@@ -553,6 +564,11 @@ export default function Home() {
       loadChapterData(chapter)
     }
   }, [selectedStudyId, selectedChapterId])
+
+  // If in study session, show the StudySession component
+  if (isInStudySession && studyConfiguration) {
+    return <StudySession configuration={studyConfiguration} onExit={handleExitStudySession} />
+  }
 
   // If a study is selected, show the chess board with chapters sidebar
   if (selectedStudyId) {
@@ -1129,23 +1145,8 @@ export default function Home() {
                           <span style={{ fontSize: "12px", color: "#666" }}>
                             {countLinesInChapter(chapter)} line{countLinesInChapter(chapter) !== 1 ? 's' : ''}
                           </span>
-                        </div>
                       </div>
-                      <button
-                        onClick={handleRefineStudy}
-                        style={{
-                          padding: "4px 8px",
-                          backgroundColor: "#6c757d",
-                          color: "#fff",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                          marginRight: "8px"
-                        }}
-                      >
-                        Refine Study
-                      </button>
+                    </div>
                       <label style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -1227,6 +1228,16 @@ export default function Home() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Study Configuration Modal */}
+        {showStudyConfiguration && selectedStudyId && (
+          <StudyConfigurationComponent
+            study={study}
+            selectedChapterIds={Array.from(selectedChaptersForStudy)}
+            onStart={handleStudyConfigurationStart}
+            onClose={() => setShowStudyConfiguration(false)}
+          />
         )}
       </div>
     )
