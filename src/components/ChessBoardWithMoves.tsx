@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Chess, Move, Square, PieceSymbol, Color } from "chess.js"
 import PieceImage from "./PieceImage"
+import CollapsibleMoveTree from "./CollapsibleMoveTree"
 import { MoveNode, createMoveNode, getPathToNode, buildTreeDisplay, TreeLine } from "@/types/moveTree"
 import { exportToPGN, importFromPGN, PGNMetadata } from "@/utils/pgnHandler"
 
@@ -38,6 +39,12 @@ export default function ChessBoardWithMoves({
   const [editingComment, setEditingComment] = useState<{
     node: MoveNode
   } | null>(null)
+  
+  // Tree view mode: "inline" (default) or "collapsible"
+  const [treeViewMode, setTreeViewMode] = useState<"inline" | "collapsible">("inline")
+  
+  // Hover preview state - temporarily shows a different position on the board
+  const [hoverPreviewNode, setHoverPreviewNode] = useState<MoveNode | null>(null)
  
   // Board interaction states
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null)
@@ -61,8 +68,13 @@ export default function ChessBoardWithMoves({
   const displayFiles = orientation === 'white' ? files : [...files].reverse()
   const displayRanks = orientation === 'white' ? ranks : [...ranks].reverse()
 
-  // Get current game state
+  // Get current game state (uses hover preview if active)
   const getCurrentGame = () => {
+    // If hovering over a move, show that position
+    if (hoverPreviewNode) {
+      return new Chess(hoverPreviewNode.fen)
+    }
+    
     if (!currentNode) {
       const game = new Chess(initialFen)
       return game
@@ -70,6 +82,14 @@ export default function ChessBoardWithMoves({
       const game = new Chess(currentNode.fen)
       return game
     }
+  }
+  
+  // Get the display position's last move (for highlighting)
+  const getDisplayLastMove = (): [Square, Square] | null => {
+    if (hoverPreviewNode) {
+      return [hoverPreviewNode.move.from as Square, hoverPreviewNode.move.to as Square]
+    }
+    return lastMove
   }
 
   // Check if we're at a leaf node (can add new moves)
@@ -467,7 +487,8 @@ export default function ChessBoardWithMoves({
   }
 
   const isSquareLastMove = (square: Square) => {
-    return lastMove && (lastMove[0] === square || lastMove[1] === square)
+    const displayLastMove = getDisplayLastMove()
+    return displayLastMove && (displayLastMove[0] === square || displayLastMove[1] === square)
   }
 
   const isKingInCheck = (square: Square) => {
@@ -748,6 +769,20 @@ export default function ChessBoardWithMoves({
                 y: e.clientY
               })
             }}
+            onMouseEnter={(e) => {
+              // Show hover preview on board
+              setHoverPreviewNode(node)
+              if (!isCurrentNode) {
+                e.currentTarget.style.backgroundColor = "#e0e0e0"
+              }
+            }}
+            onMouseLeave={(e) => {
+              // Clear hover preview
+              setHoverPreviewNode(null)
+              if (!isCurrentNode) {
+                e.currentTarget.style.backgroundColor = "transparent"
+              }
+            }}
             style={{
               cursor: "pointer",
               padding: "2px 6px",
@@ -758,16 +793,6 @@ export default function ChessBoardWithMoves({
               fontWeight: isCurrentNode ? "bold" : "normal",
               fontFamily: "monospace",
               transition: "background-color 0.15s"
-            }}
-            onMouseEnter={(e) => {
-              if (!isCurrentNode) {
-                e.currentTarget.style.backgroundColor = "#e0e0e0"
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isCurrentNode) {
-                e.currentTarget.style.backgroundColor = "transparent"
-              }
             }}
           >
             {node.move.san}
@@ -1082,6 +1107,21 @@ export default function ChessBoardWithMoves({
           >
             Copy PGN
           </button>
+          <button
+            onClick={() => setTreeViewMode(prev => prev === "inline" ? "collapsible" : "inline")}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: treeViewMode === "collapsible" ? "#9c27b0" : "#795548",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "14px",
+              fontWeight: "500"
+            }}
+          >
+            {treeViewMode === "collapsible" ? "📝 Notation" : "🌳 Visualise"}
+          </button>
         </div>
 
         {/* Move Tree Display */}
@@ -1099,7 +1139,20 @@ export default function ChessBoardWithMoves({
         }}>
           <h3 style={{ margin: "0 0 12px 0", fontSize: "18px", fontWeight: "600" }}>Move Tree</h3>
           <div style={{ flex: "1", overflowY: "auto" }}>
-            {renderTreeDisplay()}
+            {treeViewMode === "collapsible" ? (
+              <CollapsibleMoveTree
+                rootNodes={rootNodes}
+                currentNode={currentNode}
+                onNavigate={navigateToNode}
+                onContextMenu={(node, x, y) => setDropdownMenu({ node, x, y })}
+                editingComment={editingComment}
+                setEditingComment={setEditingComment}
+                setRootNodes={setRootNodes}
+                onHoverMove={setHoverPreviewNode}
+              />
+            ) : (
+              renderTreeDisplay()
+            )}
           </div>
         </div>
 
