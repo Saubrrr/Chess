@@ -1,12 +1,12 @@
 // src/components/CollapsibleMoveTree.tsx
 /**
- * Collapsible tree display for chess moves
+ * Collapsible tree display for chess moves with line selection
  * 
  * Shows moves in a file-explorer style with expandable/collapsible variations.
- * Main line stays expanded by default, variations can be toggled.
+ * Includes checkboxes for selecting lines to practice.
  */
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { MoveNode } from "@/types/moveTree"
 
 interface CollapsibleMoveTreeProps {
@@ -18,6 +18,11 @@ interface CollapsibleMoveTreeProps {
   setEditingComment: (state: { node: MoveNode } | null) => void
   setRootNodes: (nodes: MoveNode[]) => void
   onHoverMove?: (node: MoveNode | null) => void
+  // Practice mode props
+  selectionMode?: boolean
+  selectedNodes?: Set<string>
+  onSelectionChange?: (selectedNodes: Set<string>) => void
+  onStartPractice?: () => void
 }
 
 /** Count total moves in a line (including all descendants following main line) */
@@ -59,6 +64,28 @@ function isInCurrentPath(node: MoveNode, currentNode: MoveNode | null): boolean 
   return false
 }
 
+/** Get all descendant node IDs */
+function getAllDescendantIds(node: MoveNode): string[] {
+  const ids: string[] = []
+  const traverse = (n: MoveNode) => {
+    ids.push(n.id)
+    n.children.forEach(traverse)
+  }
+  traverse(node)
+  return ids
+}
+
+/** Get all ancestor node IDs */
+function getAllAncestorIds(node: MoveNode): string[] {
+  const ids: string[] = []
+  let current = node.parent
+  while (current) {
+    ids.push(current.id)
+    current = current.parent
+  }
+  return ids
+}
+
 export default function CollapsibleMoveTree({
   rootNodes,
   currentNode,
@@ -67,7 +94,11 @@ export default function CollapsibleMoveTree({
   editingComment,
   setEditingComment,
   setRootNodes,
-  onHoverMove
+  onHoverMove,
+  selectionMode = false,
+  selectedNodes = new Set(),
+  onSelectionChange,
+  onStartPractice
 }: CollapsibleMoveTreeProps) {
   // Track which variation nodes are expanded (by a unique key)
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
@@ -77,11 +108,9 @@ export default function CollapsibleMoveTree({
     if (currentNode) {
       const keysToExpand = new Set<string>()
       
-      // Walk up from current node and find which variations need to be expanded
       let current: MoveNode | null = currentNode
       while (current && current.parent) {
         const parent = current.parent
-        // If current is not the main child, it's a variation that needs expanding
         const mainChild = parent.children.find(c => c.isMainLine) || parent.children[0]
         if (current !== mainChild) {
           keysToExpand.add(`${parent.id}-${current.id}`)
@@ -89,7 +118,6 @@ export default function CollapsibleMoveTree({
         current = parent
       }
       
-      // Also check root level variations
       if (currentNode) {
         let root: MoveNode | null = currentNode
         while (root && root.parent) root = root.parent
@@ -139,7 +167,6 @@ export default function CollapsibleMoveTree({
       }
     }
     
-    // Root level variations
     const mainRoot = rootNodes.find(r => r.isMainLine) || rootNodes[0]
     rootNodes.forEach(root => {
       if (root !== mainRoot) {
@@ -154,6 +181,74 @@ export default function CollapsibleMoveTree({
   const collapseAll = () => {
     setExpandedNodes(new Set())
   }
+
+  // Selection handlers
+  const handleCheckboxChange = useCallback((node: MoveNode, checked: boolean) => {
+    if (!onSelectionChange) return
+    
+    const newSelected = new Set(selectedNodes)
+    const descendantIds = getAllDescendantIds(node)
+    const ancestorIds = getAllAncestorIds(node)
+    
+    if (checked) {
+      // Select this node and all descendants
+      descendantIds.forEach(id => newSelected.add(id))
+      // Also select all ancestors to maintain path
+      ancestorIds.forEach(id => newSelected.add(id))
+    } else {
+      // Deselect this node and all descendants
+      descendantIds.forEach(id => newSelected.delete(id))
+    }
+    
+    onSelectionChange(newSelected)
+  }, [selectedNodes, onSelectionChange])
+
+  const selectAll = useCallback(() => {
+    if (!onSelectionChange) return
+    const allIds = new Set<string>()
+    const traverse = (node: MoveNode) => {
+      allIds.add(node.id)
+      node.children.forEach(traverse)
+    }
+    rootNodes.forEach(traverse)
+    onSelectionChange(allIds)
+  }, [rootNodes, onSelectionChange])
+
+  const deselectAll = useCallback(() => {
+    if (!onSelectionChange) return
+    onSelectionChange(new Set())
+  }, [onSelectionChange])
+
+  // Check if a node is selected (or implicitly selected via parent)
+  const isNodeSelected = (nodeId: string): boolean => {
+    return selectedNodes.has(nodeId)
+  }
+
+  // Render checkbox for a move
+  const renderCheckbox = (node: MoveNode) => {
+    if (!selectionMode) return null
+    
+    const isSelected = isNodeSelected(node.id)
+    
+    return (
+      <input
+        type="checkbox"
+        checked={isSelected}
+        onChange={(e) => {
+          e.stopPropagation()
+          handleCheckboxChange(node, e.target.checked)
+        }}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "14px",
+          height: "14px",
+          marginRight: "4px",
+          cursor: "pointer",
+          accentColor: "#4a90e2"
+        }}
+      />
+    )
+  }
   
   // Render a single move span
   const renderMoveSpan = (
@@ -164,9 +259,22 @@ export default function CollapsibleMoveTree({
   ) => {
     const isCurrentNode = node === currentNode
     const isEditing = editingComment?.node === node
+    const isSelected = selectionMode && isNodeSelected(node.id)
     
     return (
-      <span key={node.id} style={{ display: "inline-flex", alignItems: "center", gap: "2px", marginRight: "4px" }}>
+      <span 
+        key={node.id} 
+        style={{ 
+          display: "inline-flex", 
+          alignItems: "center", 
+          gap: "2px", 
+          marginRight: "4px",
+          backgroundColor: isSelected ? "rgba(74, 144, 226, 0.1)" : "transparent",
+          borderRadius: "3px",
+          padding: selectionMode ? "1px 2px" : "0"
+        }}
+      >
+        {renderCheckbox(node)}
         {showMoveNumber && (
           <span style={{ 
             color: "#888", 
@@ -271,6 +379,7 @@ export default function CollapsibleMoveTree({
     const isExpanded = expandedNodes.has(key)
     const isInPath = isInCurrentPath(variation, currentNode)
     const moveCount = countMovesInLine(variation)
+    const isSelected = selectionMode && isNodeSelected(variation.id)
     
     return (
       <div key={`var-${variation.id}`} style={{ marginLeft: "12px", marginTop: "4px", marginBottom: "4px" }}>
@@ -308,26 +417,45 @@ export default function CollapsibleMoveTree({
               {renderMoveLine(variation, moveNumber, isWhite)}
             </div>
           ) : (
-            // Collapsed: show preview
-            <span
-              onClick={() => toggleExpanded(key)}
-              onMouseEnter={() => onHoverMove?.(variation)}
-              onMouseLeave={() => onHoverMove?.(null)}
-              style={{
-                cursor: "pointer",
-                fontSize: "13px",
-                color: "#666",
-                padding: "2px 8px",
-                backgroundColor: isInPath ? "#e3f2fd" : "#f5f5f5",
-                borderRadius: "3px",
-                fontFamily: "'Segoe UI', system-ui, sans-serif",
-              }}
-            >
-              {isWhite ? `${moveNumber}.` : `${moveNumber}...`} {getLinePreview(variation)} 
-              <span style={{ color: "#999", marginLeft: "6px" }}>
-                ({moveCount} {moveCount === 1 ? "move" : "moves"})
+            // Collapsed: show preview with checkbox
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              {selectionMode && (
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={(e) => {
+                    e.stopPropagation()
+                    handleCheckboxChange(variation, e.target.checked)
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: "14px",
+                    height: "14px",
+                    cursor: "pointer",
+                    accentColor: "#4a90e2"
+                  }}
+                />
+              )}
+              <span
+                onClick={() => toggleExpanded(key)}
+                onMouseEnter={() => onHoverMove?.(variation)}
+                onMouseLeave={() => onHoverMove?.(null)}
+                style={{
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  color: "#666",
+                  padding: "2px 8px",
+                  backgroundColor: isSelected ? "rgba(74, 144, 226, 0.15)" : (isInPath ? "#e3f2fd" : "#f5f5f5"),
+                  borderRadius: "3px",
+                  fontFamily: "'Segoe UI', system-ui, sans-serif",
+                }}
+              >
+                {isWhite ? `${moveNumber}.` : `${moveNumber}...`} {getLinePreview(variation)} 
+                <span style={{ color: "#999", marginLeft: "6px" }}>
+                  ({moveCount} {moveCount === 1 ? "move" : "moves"})
+                </span>
               </span>
-            </span>
+            </div>
           )}
         </div>
       </div>
@@ -396,6 +524,9 @@ export default function CollapsibleMoveTree({
   const mainRoot = rootNodes.find(r => r.isMainLine) || rootNodes[0]
   const alternativeRoots = rootNodes.filter(r => r !== mainRoot)
   
+  // Count selected moves
+  const selectedCount = selectedNodes.size
+  
   return (
     <div style={{ fontSize: "14px" }}>
       {/* Controls */}
@@ -404,7 +535,9 @@ export default function CollapsibleMoveTree({
         gap: "8px", 
         marginBottom: "12px",
         paddingBottom: "8px",
-        borderBottom: "1px solid #eee"
+        borderBottom: "1px solid #eee",
+        flexWrap: "wrap",
+        alignItems: "center"
       }}>
         <button
           onClick={expandAll}
@@ -432,7 +565,66 @@ export default function CollapsibleMoveTree({
         >
           Collapse All
         </button>
+        
+        {selectionMode && (
+          <>
+            <div style={{ width: "1px", height: "20px", backgroundColor: "#ddd" }} />
+            <button
+              onClick={selectAll}
+              style={{
+                padding: "4px 12px",
+                fontSize: "12px",
+                backgroundColor: "#e3f2fd",
+                border: "1px solid #90caf9",
+                borderRadius: "3px",
+                cursor: "pointer",
+                color: "#1976d2"
+              }}
+            >
+              Select All
+            </button>
+            <button
+              onClick={deselectAll}
+              style={{
+                padding: "4px 12px",
+                fontSize: "12px",
+                backgroundColor: "#f5f5f5",
+                border: "1px solid #ddd",
+                borderRadius: "3px",
+                cursor: "pointer"
+              }}
+            >
+              Deselect All
+            </button>
+            <span style={{ fontSize: "12px", color: "#666", marginLeft: "8px" }}>
+              {selectedCount} moves selected
+            </span>
+          </>
+        )}
       </div>
+      
+      {/* Practice button */}
+      {selectionMode && onStartPractice && (
+        <div style={{ marginBottom: "12px" }}>
+          <button
+            onClick={onStartPractice}
+            disabled={selectedCount === 0}
+            style={{
+              padding: "10px 24px",
+              fontSize: "14px",
+              fontWeight: "600",
+              backgroundColor: selectedCount > 0 ? "#4caf50" : "#ccc",
+              color: "#fff",
+              border: "none",
+              borderRadius: "6px",
+              cursor: selectedCount > 0 ? "pointer" : "not-allowed",
+              width: "100%"
+            }}
+          >
+            🎯 Start Practice {selectedCount > 0 && `(${selectedCount} moves)`}
+          </button>
+        </div>
+      )}
       
       {/* Main line */}
       <div style={{ lineHeight: "2.0" }}>

@@ -45,6 +45,18 @@ export default function ChessBoardWithMoves({
   
   // Hover preview state - temporarily shows a different position on the board
   const [hoverPreviewNode, setHoverPreviewNode] = useState<MoveNode | null>(null)
+  
+  // Practice mode state
+  const [practiceMode, setPracticeMode] = useState<"off" | "selecting" | "practicing">("off")
+  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set())
+  const [practiceState, setPracticeState] = useState<{
+    currentLine: MoveNode[]  // The line being practiced
+    currentIndex: number     // Current position in the line
+    playerColor: "w" | "b"   // Which color the player is practicing
+    wrongMove: boolean       // Whether the last move was wrong
+    completed: boolean       // Whether the line is completed
+    allowMultiple: boolean   // Allow multiple valid moves
+  } | null>(null)
  
   // Board interaction states
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null)
@@ -139,6 +151,19 @@ export default function ChessBoardWithMoves({
 
     const move = game.move({ from, to, promotion: promotion || 'q' })
     if (move) {
+      // If in practice mode, handle differently
+      if (practiceMode === "practicing" && practiceState && !practiceState.completed) {
+        // Check if it's the player's turn
+        if (move.color === practiceState.playerColor) {
+          handlePracticeMove(move)
+        }
+        // Reset selection state regardless
+        setSelectedSquare(null)
+        setLegalMoves([])
+        setPromotionState(null)
+        return
+      }
+      
       const newFen = game.fen()
       
       if (!currentNode) {
@@ -472,6 +497,236 @@ export default function ChessBoardWithMoves({
   const flipBoard = () => {
     setOrientation(prev => prev === "white" ? "black" : "white")
   }
+
+  // ==================== PRACTICE MODE FUNCTIONS ====================
+  
+  // Get all complete lines from selected nodes
+  const getSelectedLines = (): MoveNode[][] => {
+    const lines: MoveNode[][] = []
+    
+    const findEndNodes = (node: MoveNode, currentPath: MoveNode[]) => {
+      if (!selectedNodes.has(node.id)) return
+      
+      const newPath = [...currentPath, node]
+      
+      // Check if this node has any selected children
+      const selectedChildren = node.children.filter(c => selectedNodes.has(c.id))
+      
+      if (selectedChildren.length === 0) {
+        // This is an end node - add the path as a line
+        lines.push(newPath)
+      } else {
+        // Continue traversing
+        selectedChildren.forEach(child => findEndNodes(child, newPath))
+      }
+    }
+    
+    // Start from selected root nodes
+    rootNodes.forEach(root => {
+      if (selectedNodes.has(root.id)) {
+        findEndNodes(root, [])
+      }
+    })
+    
+    return lines
+  }
+  
+  // Start practice with selected lines
+  const startPractice = () => {
+    const lines = getSelectedLines()
+    if (lines.length === 0) return
+    
+    // Pick a random line
+    const randomLine = lines[Math.floor(Math.random() * lines.length)]
+    
+    // Determine player color (player plays the color that made the first move)
+    // This assumes the study is from one player's perspective
+    const firstMove = randomLine[0]
+    const playerColor = firstMove.move.color as "w" | "b"
+    
+    setPracticeState({
+      currentLine: randomLine,
+      currentIndex: 0,
+      playerColor,
+      wrongMove: false,
+      completed: false,
+      allowMultiple: false
+    })
+    
+    setPracticeMode("practicing")
+    
+    // Reset board to starting position
+    setCurrentNode(null)
+    setLastMove(null)
+    setBoardKey(prev => prev + 1)
+    
+    // If opponent moves first, auto-play their move
+    const game = new Chess(initialFen)
+    if (game.turn() !== playerColor) {
+      setTimeout(() => playOpponentMove(), 500)
+    }
+  }
+  
+  // Start a new practice line (after completion)
+  const startNewPracticeLine = () => {
+    const lines = getSelectedLines()
+    if (lines.length === 0) return
+    
+    const randomLine = lines[Math.floor(Math.random() * lines.length)]
+    const firstMove = randomLine[0]
+    const playerColor = firstMove.move.color as "w" | "b"
+    
+    setPracticeState({
+      currentLine: randomLine,
+      currentIndex: 0,
+      playerColor,
+      wrongMove: false,
+      completed: false,
+      allowMultiple: false
+    })
+    
+    setCurrentNode(null)
+    setLastMove(null)
+    setBoardKey(prev => prev + 1)
+    
+    const game = new Chess(initialFen)
+    if (game.turn() !== playerColor) {
+      setTimeout(() => playOpponentMove(), 500)
+    }
+  }
+  
+  // Play opponent's move automatically
+  const playOpponentMove = () => {
+    if (!practiceState || practiceState.completed) return
+    
+    const { currentLine, currentIndex, playerColor } = practiceState
+    
+    // Find the next opponent move
+    let idx = currentIndex
+    while (idx < currentLine.length) {
+      const node = currentLine[idx]
+      if (node.move.color !== playerColor) {
+        // This is opponent's move - play it
+        setCurrentNode(node)
+        setLastMove([node.move.from as Square, node.move.to as Square])
+        setBoardKey(prev => prev + 1)
+        
+        setPracticeState(prev => prev ? {
+          ...prev,
+          currentIndex: idx + 1
+        } : null)
+        
+        // Check if line is complete
+        if (idx + 1 >= currentLine.length) {
+          setPracticeState(prev => prev ? { ...prev, completed: true } : null)
+        }
+        return
+      }
+      idx++
+    }
+  }
+  
+  // Handle practice move (called from makeMove when in practice mode)
+  const handlePracticeMove = (move: Move): boolean => {
+    if (!practiceState || practiceState.completed || practiceState.wrongMove) return false
+    
+    const { currentLine, currentIndex, playerColor } = practiceState
+    
+    // Find the expected move(s) at this position
+    const expectedNode = currentLine[currentIndex]
+    if (!expectedNode) return false
+    
+    // Check if it's player's turn
+    if (expectedNode.move.color !== playerColor) {
+      // Not player's turn - shouldn't happen
+      return false
+    }
+    
+    // Check if the move matches
+    const isCorrect = expectedNode.move.san === move.san
+    
+    if (isCorrect) {
+      // Correct move!
+      setCurrentNode(expectedNode)
+      setLastMove([move.from as Square, move.to as Square])
+      setBoardKey(prev => prev + 1)
+      
+      const newIndex = currentIndex + 1
+      
+      if (newIndex >= currentLine.length) {
+        // Line complete!
+        setPracticeState(prev => prev ? {
+          ...prev,
+          currentIndex: newIndex,
+          completed: true
+        } : null)
+      } else {
+        setPracticeState(prev => prev ? {
+          ...prev,
+          currentIndex: newIndex
+        } : null)
+        
+        // Play opponent's next move after a short delay
+        setTimeout(() => playOpponentMove(), 500)
+      }
+      
+      return true
+    } else {
+      // Wrong move
+      setPracticeState(prev => prev ? {
+        ...prev,
+        wrongMove: true
+      } : null)
+      return false
+    }
+  }
+  
+  // Retry after wrong move
+  const retryMove = () => {
+    if (!practiceState) return
+    
+    setPracticeState(prev => prev ? {
+      ...prev,
+      wrongMove: false
+    } : null)
+  }
+  
+  // Show the correct move
+  const showCorrectMove = () => {
+    if (!practiceState) return
+    
+    const { currentLine, currentIndex } = practiceState
+    const expectedNode = currentLine[currentIndex]
+    
+    if (expectedNode) {
+      // Play the correct move
+      setCurrentNode(expectedNode)
+      setLastMove([expectedNode.move.from as Square, expectedNode.move.to as Square])
+      setBoardKey(prev => prev + 1)
+      
+      const newIndex = currentIndex + 1
+      
+      if (newIndex >= currentLine.length) {
+        setPracticeState(prev => prev ? {
+          ...prev,
+          currentIndex: newIndex,
+          completed: true,
+          wrongMove: false
+        } : null)
+      } else {
+        setPracticeState(prev => prev ? {
+          ...prev,
+          currentIndex: newIndex,
+          wrongMove: false
+        } : null)
+        
+        // Play opponent's next move
+        setTimeout(() => playOpponentMove(), 500)
+      }
+    }
+  }
+  
+  // ==================== END PRACTICE MODE FUNCTIONS ====================
 
   // Helper functions for square styling
   const isSquareLight = (file: string, rank: string) => {
@@ -1122,6 +1377,30 @@ export default function ChessBoardWithMoves({
           >
             {treeViewMode === "collapsible" ? "📝 Notation" : "🌳 Visualise"}
           </button>
+          <button
+            onClick={() => {
+              if (practiceMode === "off") {
+                setPracticeMode("selecting")
+                setTreeViewMode("collapsible") // Switch to collapsible for selection
+              } else {
+                setPracticeMode("off")
+                setPracticeState(null)
+                setSelectedNodes(new Set())
+              }
+            }}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: practiceMode !== "off" ? "#f44336" : "#4caf50",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "14px",
+              fontWeight: "500"
+            }}
+          >
+            {practiceMode !== "off" ? "✕ Exit Practice" : "🎯 Practice"}
+          </button>
         </div>
 
         {/* Move Tree Display */}
@@ -1137,9 +1416,101 @@ export default function ChessBoardWithMoves({
           display: "flex",
           flexDirection: "column"
         }}>
-          <h3 style={{ margin: "0 0 12px 0", fontSize: "18px", fontWeight: "600" }}>Move Tree</h3>
+          <h3 style={{ margin: "0 0 12px 0", fontSize: "18px", fontWeight: "600" }}>
+            {practiceMode === "selecting" ? "Select Lines to Practice" : 
+             practiceMode === "practicing" ? "Practice Mode" : "Move Tree"}
+          </h3>
           <div style={{ flex: "1", overflowY: "auto" }}>
-            {treeViewMode === "collapsible" ? (
+            {practiceMode === "practicing" ? (
+              // Practice mode - hide notation
+              <div style={{ padding: "20px", textAlign: "center" }}>
+                {practiceState?.completed ? (
+                  <div>
+                    <div style={{ fontSize: "48px", marginBottom: "16px" }}>🎉</div>
+                    <h3 style={{ color: "#4caf50", marginBottom: "16px" }}>Line Complete!</h3>
+                    <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+                      <button
+                        onClick={startNewPracticeLine}
+                        style={{
+                          padding: "12px 24px",
+                          fontSize: "14px",
+                          backgroundColor: "#4caf50",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        Practice Another Line
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPracticeMode("selecting")
+                          setPracticeState(null)
+                        }}
+                        style={{
+                          padding: "12px 24px",
+                          fontSize: "14px",
+                          backgroundColor: "#2196f3",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        Back to Selection
+                      </button>
+                    </div>
+                  </div>
+                ) : practiceState?.wrongMove ? (
+                  <div>
+                    <div style={{ fontSize: "48px", marginBottom: "16px" }}>❌</div>
+                    <h3 style={{ color: "#f44336", marginBottom: "16px" }}>Incorrect Move</h3>
+                    <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+                      <button
+                        onClick={retryMove}
+                        style={{
+                          padding: "12px 24px",
+                          fontSize: "14px",
+                          backgroundColor: "#ff9800",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        🔄 Retry
+                      </button>
+                      <button
+                        onClick={showCorrectMove}
+                        style={{
+                          padding: "12px 24px",
+                          fontSize: "14px",
+                          backgroundColor: "#2196f3",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        👁 Show Move
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <p style={{ color: "#666", marginBottom: "8px" }}>
+                      {practiceState && getCurrentGame().turn() === practiceState.playerColor 
+                        ? "Your turn - find the correct move!" 
+                        : "Opponent's turn..."}
+                    </p>
+                    <p style={{ fontSize: "12px", color: "#999" }}>
+                      Move {practiceState ? practiceState.currentIndex + 1 : 0} of {practiceState?.currentLine.length || 0}
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : treeViewMode === "collapsible" || practiceMode === "selecting" ? (
               <CollapsibleMoveTree
                 rootNodes={rootNodes}
                 currentNode={currentNode}
@@ -1149,6 +1520,10 @@ export default function ChessBoardWithMoves({
                 setEditingComment={setEditingComment}
                 setRootNodes={setRootNodes}
                 onHoverMove={setHoverPreviewNode}
+                selectionMode={practiceMode === "selecting"}
+                selectedNodes={selectedNodes}
+                onSelectionChange={setSelectedNodes}
+                onStartPractice={startPractice}
               />
             ) : (
               renderTreeDisplay()
